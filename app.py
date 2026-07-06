@@ -12,7 +12,7 @@ st.set_page_config(page_title="Finanças Pessoais", page_icon="💎", layout="wi
 # CSS bonito
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght=300;400;500;600;700&display=swap');
     * { font-family: 'Inter', sans-serif; }
     .main { background: #f7f8fc; }
     .glass-card {
@@ -38,14 +38,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Inicializar dados na sessão
+# CORREÇÃO 1: Inicializar a coluna de vencimento como datetime real do Pandas
 if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame({
         "Categoria": ["Cartão", "Conta", "Dívida", "Personalizado"],
         "Descrição": ["Fatura Junho", "Luz", "Empréstimo", "Conserto Carro"],
         "Valor Total": [2500.0, 350.0, 5000.0, 800.0],
         "Valor Pago": [0.0, 0.0, 0.0, 0.0],
-        "Vencimento": ["2026-06-10", "2026-06-15", "2026-06-30", "2026-06-25"],
+        "Vencimento": pd.to_datetime(["2026-06-10", "2026-06-15", "2026-06-30", "2026-06-25"]),
         "Pago": [False, False, False, False]
     })
     st.session_state.meta = 5000.0
@@ -89,7 +89,8 @@ def processar_excel(uploaded):
     if "Valor Total" not in df_imp.columns:
         return None
     df_imp["Valor Pago"] = 0.0
-    df_imp["Vencimento"] = datetime.now().strftime("%Y-%m-%d")
+    # CORREÇÃO 2: Garantir datetime no formato correto ao importar
+    df_imp["Vencimento"] = pd.to_datetime(datetime.now().date())
     df_imp["Pago"] = False
     return df_imp
 
@@ -173,13 +174,13 @@ with st.sidebar:
             valor = extrair_valor_imagem(image)
             if valor:
                 st.success(f"Valor detectado: R$ {valor:.2f}")
-                # Cria linha automaticamente
+                # CORREÇÃO 3: Nova linha usando datetime real para consistência
                 nova = pd.DataFrame({
                     "Categoria": ["OCR"],
                     "Descrição": ["Item da imagem"],
                     "Valor Total": [valor],
                     "Valor Pago": [0.0],
-                    "Vencimento": [datetime.now().strftime("%Y-%m-%d")],
+                    "Vencimento": [pd.to_datetime(datetime.now().date())],
                     "Pago": [False]
                 })
                 st.session_state.df = pd.concat([st.session_state.df, nova], ignore_index=True)
@@ -189,9 +190,8 @@ with st.sidebar:
             df_imp = None
         
         if df_imp is not None and not df_imp.empty:
-            # Padronizar
             df_imp["Valor Pago"] = 0.0
-            df_imp["Vencimento"] = datetime.now().strftime("%Y-%m-%d")
+            df_imp["Vencimento"] = pd.to_datetime(datetime.now().date())
             df_imp["Pago"] = False
             if st.button("✅ Inserir na lista"):
                 st.session_state.df = pd.concat([st.session_state.df, df_imp], ignore_index=True)
@@ -212,12 +212,13 @@ with st.sidebar:
         valor = st.number_input("Valor (R$)", min_value=0.01, step=10.0, format="%.2f")
         venc = st.date_input("Vencimento", value=datetime.now() + timedelta(days=15))
         if st.form_submit_button("Adicionar"):
+            # CORREÇÃO 4: Garantindo datetime na inserção manual
             nova = pd.DataFrame({
                 "Categoria": [cat],
                 "Descrição": [desc],
                 "Valor Total": [valor],
                 "Valor Pago": [0.0],
-                "Vencimento": [venc.strftime("%Y-%m-%d")],
+                "Vencimento": [pd.to_datetime(venc)],
                 "Pago": [False]
             })
             st.session_state.df = pd.concat([st.session_state.df, nova], ignore_index=True)
@@ -225,6 +226,9 @@ with st.sidebar:
 
 # Tabela
 st.subheader("📋 Suas Dívidas")
+
+# CORREÇÃO 5: Capturamos o dataframe editado diretamente do retorno da função,
+# evitando problemas de sincronia de estado e dicionários brutos do session_state.
 df_editado = st.data_editor(
     df,
     column_config={
@@ -237,20 +241,20 @@ df_editado = st.data_editor(
     },
     use_container_width=True,
     hide_index=True,
-    key="editor"
+    key="editor_key" # Alterado o nome da key para não colidir com variáveis locais
 )
 
 if st.button("💾 Salvar alterações", use_container_width=True):
-    df_novo = st.session_state.editor
-    df_novo["Valor Pago"] = df_novo.apply(lambda row: row["Valor Total"] if row["Pago"] else 0.0, axis=1)
-    st.session_state.df = df_novo
+    # Agora calculamos os valores pagos diretamente com o dataframe retornado pelo editor
+    df_editado["Valor Pago"] = df_editado.apply(lambda row: row["Valor Total"] if row["Pago"] else 0.0, axis=1)
+    st.session_state.df = df_editado
     st.success("Salvo!")
     st.rerun()
 
 if len(df[~df["Pago"]]) > 0:
     if st.button(f"✅ Pagar todas as {len(df[~df['Pago']])} pendentes", use_container_width=True):
-        df.loc[~df["Pago"], "Pago"] = True
         df.loc[~df["Pago"], "Valor Pago"] = df.loc[~df["Pago"], "Valor Total"]
+        df.loc[~df["Pago"], "Pago"] = True
         st.session_state.df = df
         st.rerun()
 
